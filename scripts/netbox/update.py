@@ -77,7 +77,7 @@ def _build_vm_update_payload(netbox_vm_id, os_vm, netbox_platform_id, include_na
                          'custom_fields': vm_custom_fields}
     if include_name:
         vm_update_payload['name'] = os_vm.name
-    if os_vm.platform_id is not None and os_vm.platform_id != netbox_platform_id:
+    if os_vm.platform_id is not None and netbox_platform_id is None:
         vm_update_payload['platform'] = os_vm.platform_id
 
     return vm_update_payload

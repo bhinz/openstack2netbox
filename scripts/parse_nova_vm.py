@@ -370,7 +370,7 @@ def compare_vm_objects(os_nova_vm_obj, nb_vm_obj):
         os_nova_vm_obj.hostname = nb_vm_obj.hostname
     try:
         image_name_changed = settings.netbox_has_openstack_image_cf and nb_vm_obj.image_name != os_nova_vm_obj.image_name
-        platform_changed = os_nova_vm_obj.platform_id is not None and nb_vm_obj.platform_id != os_nova_vm_obj.platform_id
+        platform_missing = os_nova_vm_obj.platform_id is not None and nb_vm_obj.platform_id is None
 
         if ((nb_vm_obj.name != os_nova_vm_obj.name and nb_vm_obj.name != os_nova_vm_obj.custom_name) or
                 nb_vm_obj.openstack_id != os_nova_vm_obj.instance_id or
@@ -383,7 +383,7 @@ def compare_vm_objects(os_nova_vm_obj, nb_vm_obj):
                 nb_vm_obj.flavorram != os_nova_vm_obj.flavorram or
                 nb_vm_obj.flavorswap != os_nova_vm_obj.flavorswap or
                 image_name_changed or
-                platform_changed or
+                platform_missing or
                 # We skip disk as it is defined by Virtual Disks
                 nb_vm_obj.flavorephemeral != os_nova_vm_obj.flavorephemeral):
             #print(vars(os_nova_vm_obj))
