@@ -27,39 +27,84 @@ cluster_name = settings.cluster_name
 netboxtagopenstackapiscriptid = settings.netboxtagopenstackapiscriptid
 
 
+def _is_vm_name_uniqueness_error(error_text):
+    return (
+        "The request failed with code 400 Bad Request:" in error_text and
+        (
+            "Virtual machine name must be unique per cluster." in error_text or
+            "virtualization_virtualmachine_unique_name_cluster_tenant" in error_text
+        )
+    )
+
+
+def _build_vm_update_payload(netbox_vm_id, os_vm, netbox_platform_id, include_name=True):
+    vm_custom_fields = {'openstack_id': os_vm.instance_id, 'openstack_hypervisor': os_vm.hypervisor,
+                        'openstack_flavor': os_vm.flavorname, 'openstack_swap': os_vm.flavorswap,
+                        'openstack_ephemeral': os_vm.flavorephemeral, 'openstack_tenant': os_vm.tenant,
+                        'openstack_hostname': os_vm.hostname}
+    if settings.netbox_has_openstack_image_cf:
+        vm_custom_fields['openstack_image'] = os_vm.image_name
+
+    vm_update_payload = {'id': netbox_vm_id,
+                         'status': os_vm.status,
+                         'vcpus': os_vm.flavorcpu,
+                         'memory': os_vm.flavorram,
+                         'custom_fields': vm_custom_fields}
+    if include_name:
+        vm_update_payload['name'] = os_vm.name
+    if os_vm.platform_id is not None and os_vm.platform_id != netbox_platform_id:
+        vm_update_payload['platform'] = os_vm.platform_id
+
+    return vm_update_payload
+
+
 def updatenetboxvm(netbox_vm_id, os_vm, netbox_platform_id=None):
     # Update OpenStack VM in Netbox based on given values
     # Any value passed to Netbox API, will only do something if the value is different
     try:
-        vm_custom_fields = {'openstack_id': os_vm.instance_id, 'openstack_hypervisor': os_vm.hypervisor,
-                            'openstack_flavor': os_vm.flavorname, 'openstack_swap': os_vm.flavorswap,
-                            'openstack_ephemeral': os_vm.flavorephemeral, 'openstack_tenant': os_vm.tenant,
-                            'openstack_hostname': os_vm.hostname}
-        if settings.netbox_has_openstack_image_cf:
-            vm_custom_fields['openstack_image'] = os_vm.image_name
-
-        vm_update_payload = {'id': netbox_vm_id,
-                             'name': os_vm.name,
-                             'status': os_vm.status,
-                             'vcpus': os_vm.flavorcpu,
-                             'memory': os_vm.flavorram,
-                             'custom_fields': vm_custom_fields}
-        if os_vm.platform_id is not None and os_vm.platform_id != netbox_platform_id:
-            vm_update_payload['platform'] = os_vm.platform_id
-
+        vm_update_payload = _build_vm_update_payload(netbox_vm_id, os_vm, netbox_platform_id)
         vmer = nb.virtualization.virtual_machines.update([
             vm_update_payload
         ])
         print(f"Updated {os_vm.name} in Netbox cluster {cluster_name} based on OpenStack ID {os_vm.instance_id}")
     except Exception as e:
-        if ("The request failed with code 400 Bad Request:" in str(e) and
-                "Virtual machine name must be unique per cluster." in str(e)):
-            # If the VM in OpenStack still does not have a unique name for us to use in NetBox
-            # We update it with our custom name instead
+        error_text = str(e)
+        if _is_vm_name_uniqueness_error(error_text):
+            # If the VM in OpenStack still does not have a unique name for us to use in NetBox,
+            # we retry with our custom name.
             os_vm.name = os_vm.custom_name
-            updatenetboxvm(netbox_vm_id, os_vm, netbox_platform_id)
-            print(f"Updated custom-named VM {os_vm.custom_name} in Netbox cluster {cluster_name} "
-                  f"based on OpenStack ID {os_vm.instance_id}")
+            try:
+                custom_name_payload = _build_vm_update_payload(netbox_vm_id, os_vm, netbox_platform_id)
+                vmer = nb.virtualization.virtual_machines.update([
+                    custom_name_payload
+                ])
+                print(f"Updated custom-named VM {os_vm.custom_name} in Netbox cluster {cluster_name} "
+                      f"based on OpenStack ID {os_vm.instance_id}")
+            except Exception as custom_name_error:
+                custom_error_text = str(custom_name_error)
+                if _is_vm_name_uniqueness_error(custom_error_text):
+                    # NetBox can have a pre-existing colliding custom name. In that case,
+                    # keep the current VM name and update all other fields to avoid aborting the full sync.
+                    try:
+                        no_name_payload = _build_vm_update_payload(
+                            netbox_vm_id,
+                            os_vm,
+                            netbox_platform_id,
+                            include_name=False
+                        )
+                        vmer = nb.virtualization.virtual_machines.update([
+                            no_name_payload
+                        ])
+                        print(f"Updated VM fields except name for OpenStack ID {os_vm.instance_id} "
+                              f"because custom name {os_vm.custom_name} conflicts in Netbox cluster {cluster_name}.")
+                    except Exception as fallback_error:
+                        print(f"Unable to update VM (including fallback without name) for OpenStack ID "
+                              f"{os_vm.instance_id} in Netbox cluster {cluster_name} \n{fallback_error}")
+                        sys.exit(1)
+                else:
+                    print(f"Unable to update custom-named VM {os_vm.custom_name} in Netbox cluster {cluster_name} "
+                          f"based on OpenStack ID {os_vm.instance_id} \n{custom_name_error}")
+                    sys.exit(1)
         else:
             print(f"Unable to update custom-named VM {os_vm.custom_name} in Netbox cluster {cluster_name} "
                   f"based on OpenStack ID {os_vm.instance_id} \n{e}")
