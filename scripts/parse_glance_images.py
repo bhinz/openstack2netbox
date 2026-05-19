@@ -68,14 +68,14 @@ def _build_platform_custom_fields(os_image, os_version):
     return custom_fields
 
 
-def _build_platform_create_payload(os_image):
+def _build_platform_create_payload(os_image, platform_name=None):
     image_name = os_image['image_name']
     image_id = os_image['image_id']
     os_version = _extract_os_version(image_name)
     platform_slug = _platform_slug_from_image_id(image_id)
 
     payload = {
-        'name': image_name,
+        'name': platform_name if platform_name is not None else image_name,
         'slug': platform_slug,
     }
 
@@ -104,6 +104,28 @@ def _build_platform_update_payload(existing_platform, os_image):
     return payload
 
 
+def _get_platform_matches_by_image_id(image_id):
+    return list(nb.dcim.platforms.filter(cf_openstack_image_id=image_id))
+
+
+def _get_platform_matches_by_name(image_name):
+    return list(nb.dcim.platforms.filter(name=image_name))
+
+
+def _platform_has_openstack_image_id(platform):
+    custom_fields = getattr(platform, 'custom_fields', None) or {}
+    return custom_fields.get('openstack_image_id') not in (None, "")
+
+
+def _get_next_available_platform_name(base_name):
+    suffix_counter = 2
+    while True:
+        candidate_name = f"{base_name} {suffix_counter}"
+        if len(_get_platform_matches_by_name(candidate_name)) == 0:
+            return candidate_name
+        suffix_counter += 1
+
+
 def glanceimages_to_netboxplatforms(openstack_image_dictionary):
     if not settings.netbox_has_platform_openstack_image_id_cf:
         print("NetBox custom field openstack_image_id for dcim.platform is required for image sync.")
@@ -122,7 +144,7 @@ def glanceimages_to_netboxplatforms(openstack_image_dictionary):
             continue
 
         try:
-            platform_matches = list(nb.dcim.platforms.filter(cf_openstack_image_id=os_image['image_id']))
+            platform_matches = _get_platform_matches_by_image_id(os_image['image_id'])
         except Exception as e:
             print(f"Unable to query NetBox platform for image {image_name} \n{e}")
             sys.exit(1)
@@ -133,9 +155,37 @@ def glanceimages_to_netboxplatforms(openstack_image_dictionary):
             continue
 
         existing_platform = platform_matches[0] if len(platform_matches) == 1 else None
+        create_name = image_name
+
+        # If no platform is linked by OpenStack image ID yet, try matching by platform name.
+        # This handles pre-existing platforms and avoids create failures on unique-name constraints.
+        if existing_platform is None:
+            try:
+                platform_name_matches = _get_platform_matches_by_name(image_name)
+            except Exception as e:
+                print(f"Unable to query NetBox platform by name for image {image_name} \n{e}")
+                sys.exit(1)
+
+            if len(platform_name_matches) > 1:
+                try:
+                    create_name = _get_next_available_platform_name(image_name)
+                except Exception as e:
+                    print(f"Unable to resolve a unique NetBox platform name for image {image_name} \n{e}")
+                    sys.exit(1)
+
+            if len(platform_name_matches) == 1:
+                candidate_platform = platform_name_matches[0]
+                if _platform_has_openstack_image_id(candidate_platform):
+                    try:
+                        create_name = _get_next_available_platform_name(image_name)
+                    except Exception as e:
+                        print(f"Unable to resolve a unique NetBox platform name for image {image_name} \n{e}")
+                        sys.exit(1)
+                else:
+                    existing_platform = candidate_platform
 
         if existing_platform is None:
-            create_payload = _build_platform_create_payload(os_image)
+            create_payload = _build_platform_create_payload(os_image, create_name)
             try:
                 nb.dcim.platforms.create(**create_payload)
                 created_platforms += 1
