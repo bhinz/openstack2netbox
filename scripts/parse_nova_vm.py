@@ -286,30 +286,16 @@ def define_nova_object(instance, flavordictionary, tenantdictionary):
         else:
             print(f"Unable to fetch and or set instancehypervisor variable \n{e}")
             sys.exit(1)
-    if instance.status == "ACTIVE":
-        try:
-            # Attempt to get hostname from console output, only if the Instance in a normal state
-            consoleoutput = instance.get_console_output()  # Admin only call
-            hostnamesearch = re.search(r'(.*)\s\blogin:\s', consoleoutput)
-            try:
-                hostname = re.sub(r'\s\blogin:\s', '', hostnamesearch.group(0))
-            except Exception as e:
-                if str(e) == "'NoneType' object has no attribute 'group'":
-                    # If the regex finds no matches, we set the hostname to unknown
-                    hostname = "unknown"
-                else:
-                    print(f"Unable to fetch hostname for {instance.name} \n{e}")
-                    sys.exit(1)
-        except Exception as e:
-            if "Policy doesn't allow os_compute_api:os-console-output to be performed. (HTTP 403)" in str(e):
-                # A non-admin was used to request this information, so we set the hostname to Unknown
-                hostname = "unknown"
-            else:
-                print(f"Unable to get console-output for Instance {instance.name} \n{e}")
-                sys.exit(1)
-    else:
-        # Console output won't be available for Instances that are shutoff/unavailable, so set hostname to unknown
+    try:
+        hostname = getattr(instance, 'OS-EXT-SRV-ATTR:hostname', instance.name)
+
+        if not hostname:
+            hostname = "unknown"
+
+    except Exception as e:
+        print(f"Fehler beim Abrufen des Namens für {instance.name}: {e}")
         hostname = "unknown"
+
     nova_vm = CreateNovaVmObject(instancename, custom_instance_name, instance.id, instancetenant,
                                  currentstatus, instancehypervisor, hostname,
                                  os_instance_flavorname, os_instance_flavorcpu, os_instance_flavorram,
