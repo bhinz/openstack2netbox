@@ -27,6 +27,7 @@ keystone = settings.keystone
 cinder = settings.cinder
 nova = settings.nova
 neutron = settings.neutron
+glance = settings.glance
 
 
 def _extract_image_field(obj, keys):
@@ -59,18 +60,28 @@ def _extract_image_field(obj, keys):
     return None
 
 
-def get_glance_images():
+def _add_image_to_dictionary(image_dictionary, image_id, image_name, os_type=None, os_distro=None):
+    if image_id is None:
+        return
+
+    image_id = str(image_id)
+    if image_name is None or image_name == "":
+        image_name = image_id
+
+    image_dictionary[image_id] = {
+        'image_id': image_id,
+        'image_name': str(image_name)[:128],
+        'os_type': os_type,
+        'os_distro': os_distro,
+    }
+
+
+def get_glance_images(instances=None):
     try:
-        if hasattr(nova, 'glance'):
-            os_images = list(nova.glance.list())
-        else:
-            os_images = nova.images.list()
+        os_images = list(glance.images.list())
     except Exception as e:
-        try:
-            os_images = nova.images.list()
-        except Exception as e2:
-            print(f"Unable to collect OpenStack image information \n{e2}")
-            sys.exit(1)
+        print(f"Unable to collect OpenStack image information via Glance \n{e}")
+        sys.exit(1)
 
     image_dictionary = {}
     try:
@@ -85,21 +96,45 @@ def get_glance_images():
             if image_id is None:
                 continue
 
-            image_id = str(image_id)
-            if image_name is None or image_name == "":
-                image_name = image_id
-
-            image_dictionary[image_id] = {
-                'image_id': image_id,
-                'image_name': str(image_name)[:128],
-                'os_type': _extract_image_field(image, ("os_type", "hw_os_type")),
-                'os_distro': _extract_image_field(image, ("os_distro",)),
-            }
+            _add_image_to_dictionary(
+                image_dictionary,
+                image_id,
+                image_name,
+                _extract_image_field(image, ("os_type", "hw_os_type")),
+                _extract_image_field(image, ("os_distro",)),
+            )
     except Exception as e:
         print(f"Unable to parse OpenStack image information \n{e}")
         sys.exit(1)
 
-    print("Fetched OpenStack image information")
+    # Some environments restrict image listings by policy/visibility. To avoid missing
+    # platforms for running VMs, include image references directly from fetched instances.
+    if instances is not None:
+        try:
+            for instance in instances:
+                image_payload = getattr(instance, 'image', None)
+                if not image_payload:
+                    continue
+
+                if isinstance(image_payload, dict):
+                    instance_image_id = image_payload.get('id')
+                    instance_image_name = image_payload.get('name')
+                else:
+                    instance_image_id = getattr(image_payload, 'id', None)
+                    instance_image_name = getattr(image_payload, 'name', None)
+
+                if instance_image_id is None:
+                    continue
+
+                if str(instance_image_id) in image_dictionary:
+                    continue
+
+                _add_image_to_dictionary(image_dictionary, instance_image_id, instance_image_name)
+        except Exception as e:
+            print(f"Unable to supplement OpenStack image information from instances \n{e}")
+            sys.exit(1)
+
+    print(f"Fetched OpenStack image information ({len(image_dictionary)} images)")
     return image_dictionary
 
 

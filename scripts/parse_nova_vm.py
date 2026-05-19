@@ -86,7 +86,7 @@ def _get_boot_volume_ids(instance):
 def _resolve_boot_volume_metadata(instance):
     volume_ids = _get_boot_volume_ids(instance)
     if not volume_ids:
-        return None, None
+        return None, None, None, None
 
     for volume_id in volume_ids:
         if volume_id in volume_metadata_cache:

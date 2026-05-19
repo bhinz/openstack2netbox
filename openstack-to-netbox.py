@@ -56,7 +56,7 @@ try:
     print(f'\nFetching information from OpenStack \n')
     keystone_tenant_dictionary = get_keystone()
     nova_instances, nova_flavor_dictionary = get_nova()
-    glance_image_dictionary = get_glance_images()
+    glance_image_dictionary = get_glance_images(nova_instances)
     cinder_volume_dictionary = get_cinder()
     (neutron_interface_dictionary, neutron_network_private_dictionary, neutron_float_dictionary,
      neutron_router_dictionary, neutron_dhcpagent_dictionary, neutron_subnet_dictionary) = get_neutron()

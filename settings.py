@@ -145,11 +145,13 @@ if os_auth_url_type == "public":
     novaendpoint = "publicURL"
     cinderendpoint = "publicURL"
     neutronendpoint = "publicURL"
+    glanceendpoint = "public"
 elif os_auth_url_type == "internal":
     keystoneendpoint = "internal"
     novaendpoint = "internalURL"
     cinderendpoint = "internalURL"
     neutronendpoint = "internalURL"
+    glanceendpoint = "internal"
 elif os_auth_url_type != "public" or os_auth_url_type != "internal":
     print(f"os_auth_url_type was not set to 'public' or 'internal'")
     sys.exit(1)
@@ -187,6 +189,16 @@ try:
     cinder = client.Client(3.6, session=sesder, endpoint_type=cinderendpoint)
 except Exception as e:
     print(f"Unable to authenticaticate with Cinder using the supplied credentials. \n{e}")
+    sys.exit(1)
+
+
+try:
+    # Glance client
+    from glanceclient import client
+    sesglance = session.Session(auth=auth)
+    glance = client.Client('2', session=sesglance, interface=glanceendpoint)
+except Exception as e:
+    print(f"Unable to authenticaticate with Glance using the supplied credentials. \n{e}")
     sys.exit(1)
 
 
