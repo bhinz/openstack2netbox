@@ -20,6 +20,7 @@
 #  SOFTWARE.
 
 import sys
+import re
 
 import settings
 nb = settings.nb
@@ -35,6 +36,30 @@ def _is_vm_name_uniqueness_error(error_text):
             "virtualization_virtualmachine_unique_name_cluster_tenant" in error_text
         )
     )
+
+
+def _extract_vm_disk_aggregate_size(error_text):
+    # NetBox rejects VM updates if vm.disk differs from sum(virtual_disks).
+    match = re.search(
+        r"The specified disk size \((\d+)\) must match the aggregate size of assigned virtual disks \((\d+)\)\.",
+        error_text,
+    )
+    if match is None:
+        return None
+    return int(match.group(2))
+
+
+def _update_vm_with_disk_fallback(vm_update_payload):
+    try:
+        return nb.virtualization.virtual_machines.update([vm_update_payload])
+    except Exception as update_error:
+        aggregate_disk_size = _extract_vm_disk_aggregate_size(str(update_error))
+        if aggregate_disk_size is None:
+            raise
+
+        corrected_payload = dict(vm_update_payload)
+        corrected_payload['disk'] = aggregate_disk_size
+        return nb.virtualization.virtual_machines.update([corrected_payload])
 
 
 def _build_vm_update_payload(netbox_vm_id, os_vm, netbox_platform_id, include_name=True):
@@ -63,9 +88,7 @@ def updatenetboxvm(netbox_vm_id, os_vm, netbox_platform_id=None):
     # Any value passed to Netbox API, will only do something if the value is different
     try:
         vm_update_payload = _build_vm_update_payload(netbox_vm_id, os_vm, netbox_platform_id)
-        vmer = nb.virtualization.virtual_machines.update([
-            vm_update_payload
-        ])
+        vmer = _update_vm_with_disk_fallback(vm_update_payload)
         print(f"Updated {os_vm.name} in Netbox cluster {cluster_name} based on OpenStack ID {os_vm.instance_id}")
     except Exception as e:
         error_text = str(e)
@@ -75,9 +98,7 @@ def updatenetboxvm(netbox_vm_id, os_vm, netbox_platform_id=None):
             os_vm.name = os_vm.custom_name
             try:
                 custom_name_payload = _build_vm_update_payload(netbox_vm_id, os_vm, netbox_platform_id)
-                vmer = nb.virtualization.virtual_machines.update([
-                    custom_name_payload
-                ])
+                vmer = _update_vm_with_disk_fallback(custom_name_payload)
                 print(f"Updated custom-named VM {os_vm.custom_name} in Netbox cluster {cluster_name} "
                       f"based on OpenStack ID {os_vm.instance_id}")
             except Exception as custom_name_error:
@@ -92,9 +113,7 @@ def updatenetboxvm(netbox_vm_id, os_vm, netbox_platform_id=None):
                             netbox_platform_id,
                             include_name=False
                         )
-                        vmer = nb.virtualization.virtual_machines.update([
-                            no_name_payload
-                        ])
+                        vmer = _update_vm_with_disk_fallback(no_name_payload)
                         print(f"Updated VM fields except name for OpenStack ID {os_vm.instance_id} "
                               f"because custom name {os_vm.custom_name} conflicts in Netbox cluster {cluster_name}.")
                     except Exception as fallback_error:
