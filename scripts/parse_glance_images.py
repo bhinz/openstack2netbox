@@ -93,7 +93,15 @@ def _build_platform_update_payload(existing_platform, os_image):
     payload = {'id': existing_platform.id}
 
     if existing_platform.name != os_image['image_name']:
-        payload['name'] = os_image['image_name']
+        desired_name = os_image['image_name']
+        desired_name_matches = _get_platform_matches_by_name(desired_name)
+        desired_name_taken = any(platform.id != existing_platform.id for platform in desired_name_matches)
+
+        if desired_name_taken:
+            desired_name = _get_next_available_platform_name(desired_name)
+
+        if existing_platform.name != desired_name:
+            payload['name'] = desired_name
 
     custom_fields = _build_platform_custom_fields(os_image, os_version)
     if custom_fields:
