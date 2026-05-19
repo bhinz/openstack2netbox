@@ -24,6 +24,7 @@ import time
 
 from scripts.openstack.fetchinfo import get_keystone
 from scripts.openstack.fetchinfo import get_nova
+from scripts.openstack.fetchinfo import get_glance_images
 from scripts.openstack.fetchinfo import get_cinder
 from scripts.openstack.fetchinfo import get_neutron
 
@@ -35,6 +36,7 @@ from scripts.netbox.fetchinfo import nbfetchsubnets
 from scripts.netbox.fetchinfo import nbfetchaddresses
 
 from scripts.parse_nova_vm import nova_to_netboxvms
+from scripts import parse_glance_images
 from scripts.parse_neutron_vm import neutronrouter_to_netboxvms
 from scripts.parse_neutron_vm import neutrondhcp_to_netboxvms
 from scripts.parse_cinder_volumes import cinder_to_netboxdisks
@@ -54,6 +56,7 @@ try:
     print(f'\nFetching information from OpenStack \n')
     keystone_tenant_dictionary = get_keystone()
     nova_instances, nova_flavor_dictionary = get_nova()
+    glance_image_dictionary = get_glance_images()
     cinder_volume_dictionary = get_cinder()
     (neutron_interface_dictionary, neutron_network_private_dictionary, neutron_float_dictionary,
      neutron_router_dictionary, neutron_dhcpagent_dictionary, neutron_subnet_dictionary) = get_neutron()
@@ -78,6 +81,15 @@ except Exception as e:
 
 print(f'Creation and or updating of NetBox objects will start in 5 seconds. \n')
 time.sleep(5)
+
+
+try:
+    print(f"Attempting to create/update NetBox Platforms based on OpenStack Images")
+    parse_glance_images.glanceimages_to_netboxplatforms(glance_image_dictionary)
+    print('NetBox Platforms have been created or updated succesfully \n')
+except Exception as e:
+    print(f"NetBox Platform creation or updating failed \n{e}")
+    sys.exit(1)
 
 
 try:

@@ -30,20 +30,28 @@ netboxtagopenstackapiscriptid = settings.netboxtagopenstackapiscriptid
 
 def createnetboxvm(os_vm):
     try:
+        vm_custom_fields = {'openstack_id': os_vm.instance_id, 'openstack_hypervisor': os_vm.hypervisor,
+                            'openstack_flavor': os_vm.flavorname, 'openstack_swap': os_vm.flavorswap,
+                            'openstack_ephemeral': os_vm.flavorephemeral, 'openstack_tenant': os_vm.tenant,
+                            'openstack_hostname': os_vm.hostname}
+        if settings.netbox_has_openstack_image_cf:
+            vm_custom_fields['openstack_image'] = os_vm.image_name
+
+        vm_create_payload = {
+            'name': os_vm.name,
+            'status': os_vm.status,
+            'cluster': clusterid,
+            'vcpus': os_vm.flavorcpu,
+            'memory': os_vm.flavorram,
+            'tags': [netboxtagopenstackapiscriptid],
+            'custom_fields': vm_custom_fields,
+            'comments': f"Created by OpenStack API script but this time an Instance-based VM for {cluster_name}",
+        }
+        if os_vm.platform_id is not None:
+            vm_create_payload['platform'] = os_vm.platform_id
+
         # Create a Netbox VM based on passed values
-        vm = nb.virtualization.virtual_machines.create(
-            name=os_vm.name,
-            status=os_vm.status,
-            cluster=clusterid,
-            vcpus=os_vm.flavorcpu,
-            memory=os_vm.flavorram,
-            tags=[netboxtagopenstackapiscriptid],
-            custom_fields={'openstack_id': os_vm.instance_id, 'openstack_hypervisor': os_vm.hypervisor,
-                           'openstack_flavor': os_vm.flavorname, 'openstack_swap': os_vm.flavorswap,
-                           'openstack_ephemeral': os_vm.flavorephemeral, 'openstack_tenant': os_vm.tenant,
-                           'openstack_hostname': os_vm.hostname},
-            comments=f"Created by OpenStack API script but this time an Instance-based VM for {cluster_name}"
-        )
+        vm = nb.virtualization.virtual_machines.create(**vm_create_payload)
         print(f"Created VM {os_vm.name} in Netbox cluster {cluster_name}.")
     except Exception as e:
         if ("The request failed with code 400 Bad Request:" in str(e) and

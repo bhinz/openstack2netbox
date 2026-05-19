@@ -27,21 +27,28 @@ cluster_name = settings.cluster_name
 netboxtagopenstackapiscriptid = settings.netboxtagopenstackapiscriptid
 
 
-def updatenetboxvm(netbox_vm_id, os_vm):
+def updatenetboxvm(netbox_vm_id, os_vm, netbox_platform_id=None):
     # Update OpenStack VM in Netbox based on given values
     # Any value passed to Netbox API, will only do something if the value is different
     try:
+        vm_custom_fields = {'openstack_id': os_vm.instance_id, 'openstack_hypervisor': os_vm.hypervisor,
+                            'openstack_flavor': os_vm.flavorname, 'openstack_swap': os_vm.flavorswap,
+                            'openstack_ephemeral': os_vm.flavorephemeral, 'openstack_tenant': os_vm.tenant,
+                            'openstack_hostname': os_vm.hostname}
+        if settings.netbox_has_openstack_image_cf:
+            vm_custom_fields['openstack_image'] = os_vm.image_name
+
+        vm_update_payload = {'id': netbox_vm_id,
+                             'name': os_vm.name,
+                             'status': os_vm.status,
+                             'vcpus': os_vm.flavorcpu,
+                             'memory': os_vm.flavorram,
+                             'custom_fields': vm_custom_fields}
+        if os_vm.platform_id is not None and os_vm.platform_id != netbox_platform_id:
+            vm_update_payload['platform'] = os_vm.platform_id
+
         vmer = nb.virtualization.virtual_machines.update([
-            {'id': netbox_vm_id,
-             'name': os_vm.name,
-             'status': os_vm.status,
-             'vcpus': os_vm.flavorcpu,
-             'memory': os_vm.flavorram,
-             'custom_fields': {'openstack_id': os_vm.instance_id, 'openstack_hypervisor': os_vm.hypervisor,
-                               'openstack_flavor': os_vm.flavorname, 'openstack_swap': os_vm.flavorswap,
-                               'openstack_ephemeral': os_vm.flavorephemeral, 'openstack_tenant': os_vm.tenant,
-                               'openstack_hostname': os_vm.hostname}
-             }
+            vm_update_payload
         ])
         print(f"Updated {os_vm.name} in Netbox cluster {cluster_name} based on OpenStack ID {os_vm.instance_id}")
     except Exception as e:
@@ -50,11 +57,11 @@ def updatenetboxvm(netbox_vm_id, os_vm):
             # If the VM in OpenStack still does not have a unique name for us to use in NetBox
             # We update it with our custom name instead
             os_vm.name = os_vm.custom_name
-            updatenetboxvm(netbox_vm_id, os_vm)
+            updatenetboxvm(netbox_vm_id, os_vm, netbox_platform_id)
             print(f"Updated custom-named VM {os_vm.custom_name} in Netbox cluster {cluster_name} "
                   f"based on OpenStack ID {os_vm.instance_id}")
         else:
-            print(f"Unable to update custom-named VM {os_vm.customname} in Netbox cluster {cluster_name} "
+            print(f"Unable to update custom-named VM {os_vm.custom_name} in Netbox cluster {cluster_name} "
                   f"based on OpenStack ID {os_vm.instance_id} \n{e}")
             sys.exit(1)
 

@@ -69,6 +69,20 @@ try:
         nb.extras.custom_fields.get(name="openstack_volumeid").id
         nb.extras.custom_fields.get(name="openstack_subnetid").id
         netboxtagopenstackapiscriptid = nb.extras.tags.get(slug="openstack-api-script").id
+
+        # Optional custom field: allows storing OpenStack image names on NetBox VMs.
+        openstack_image_custom_field = nb.extras.custom_fields.get(name="openstack_image")
+        netbox_has_openstack_image_cf = openstack_image_custom_field is not None
+
+        # Optional custom fields for NetBox Platforms generated from OpenStack images.
+        platform_os_type_custom_field = nb.extras.custom_fields.get(name="openstack_type")
+        netbox_has_platform_os_type_cf = platform_os_type_custom_field is not None
+        platform_os_distro_custom_field = nb.extras.custom_fields.get(name="openstack_distro")
+        netbox_has_platform_os_distro_cf = platform_os_distro_custom_field is not None
+        platform_os_version_custom_field = nb.extras.custom_fields.get(name="openstack_version")
+        netbox_has_platform_os_version_cf = platform_os_version_custom_field is not None
+        platform_openstack_image_id_custom_field = nb.extras.custom_fields.get(name="openstack_image_id")
+        netbox_has_platform_openstack_image_id_cf = platform_openstack_image_id_custom_field is not None
     except Exception as e:
         if "Token expired" in str(e):
             print(f"The supplied Netbox user has its token expired: \n{e}")
@@ -82,6 +96,49 @@ try:
 except Exception as e:
     print(f"Unable to connect to Netbox \n{e}")
     sys.exit(1)
+
+
+_platform_id_cache = {}
+
+
+def get_platform_slug_by_image_id(image_id):
+    if not image_id:
+        return None
+    return f"openstack-image-{str(image_id).lower()}"
+
+
+def get_platform_id_by_image_id(image_id):
+    if not image_id:
+        return None
+
+    if not netbox_has_platform_openstack_image_id_cf:
+        print("NetBox custom field openstack_image_id for dcim.platform is required for platform lookup.")
+        return None
+
+    image_id_key = str(image_id)
+    cache_key = f"image-id::{image_id_key}"
+    if cache_key in _platform_id_cache:
+        return _platform_id_cache[cache_key]
+
+    try:
+        platform_matches = list(nb.dcim.platforms.filter(cf_openstack_image_id=image_id_key))
+    except Exception as e:
+        print(f"Unable to fetch NetBox platform for OpenStack image ID {image_id_key}. Platform assignment will be skipped.\n{e}")
+        _platform_id_cache[cache_key] = None
+        return None
+
+    if len(platform_matches) == 0:
+        _platform_id_cache[cache_key] = None
+        return None
+
+    if len(platform_matches) > 1:
+        print(f"Found multiple NetBox platforms with openstack_image_id {image_id_key}. Platform assignment will be skipped.")
+        _platform_id_cache[cache_key] = None
+        return None
+
+    platform_obj = platform_matches[0]
+    _platform_id_cache[cache_key] = platform_obj.id
+    return platform_obj.id
 
 if os_auth_url_type == "public":
     keystoneendpoint = "public"

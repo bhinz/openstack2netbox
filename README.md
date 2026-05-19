@@ -118,11 +118,24 @@ openstack_hostname;text;virtualization.virtualmachine;5000;loose;80;Hostname;Ope
 openstack_flavor;text;virtualization.virtualmachine;5000;loose;91;Flavor name;OpenStack
 openstack_swap;integer;virtualization.virtualmachine;5000;loose;92;Swap storage;OpenStack
 openstack_ephemeral;integer;virtualization.virtualmachine;5000;loose;93;Ephemeral storage;OpenStack
+openstack_image;text;virtualization.virtualmachine;5000;loose;94;Image name;OpenStack
 openstack_interfaceid;text;virtualization.vminterface;5000;loose;90;Interface ID;OpenStack
 openstack_networkid;text;ipam.vrf;5000;loose;90;Network ID;OpenStack
 openstack_volumeid;text;virtualization.virtualdisk;5000;loose;90;Volume ID;OpenStack
 openstack_subnetid;text;ipam.prefix;5000;loose;90;Subnet ID;OpenStack
+openstack_type;text;dcim.platform;5000;loose;95;OS type;OpenStack
+openstack_distro;text;dcim.platform;5000;loose;96;OS distro;OpenStack
+openstack_version;text;dcim.platform;5000;loose;96;OS version;OpenStack
+openstack_image_id;text;dcim.platform;5000;loose;97;OpenStack image ID;OpenStack
 ```
+
+The script now also imports OpenStack images and creates NetBox Platforms for them.
+Platform name is based on the OpenStack image name. Platform custom field `openstack_type` is filled from image properties
+`openstack_distro` is filled from image property `os_distro`,
+and `openstack_version` is extracted from the image name when possible.
+
+When syncing VMs, the script binds the VM Platform using OpenStack image ID only.
+The platform lookup uses custom field filtering via `cf_openstack_image_id`.
 
 We add a Tag, so we can filter for objects created by our script:  
 **Customization --> Tags --> Import**

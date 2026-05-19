@@ -29,6 +29,80 @@ nova = settings.nova
 neutron = settings.neutron
 
 
+def _extract_image_field(obj, keys):
+    if obj is None:
+        return None
+
+    candidate_maps = []
+    if isinstance(obj, dict):
+        candidate_maps.append(obj)
+
+    properties = getattr(obj, 'properties', None)
+    if isinstance(properties, dict):
+        candidate_maps.append(properties)
+
+    metadata = getattr(obj, 'metadata', None)
+    if isinstance(metadata, dict):
+        candidate_maps.append(metadata)
+
+    for map_obj in candidate_maps:
+        for key in keys:
+            value = map_obj.get(key)
+            if value:
+                return str(value).strip().lower()
+
+    for key in keys:
+        direct_value = getattr(obj, key, None)
+        if direct_value:
+            return str(direct_value).strip().lower()
+
+    return None
+
+
+def get_glance_images():
+    try:
+        if hasattr(nova, 'glance'):
+            os_images = list(nova.glance.list())
+        else:
+            os_images = nova.images.list()
+    except Exception as e:
+        try:
+            os_images = nova.images.list()
+        except Exception as e2:
+            print(f"Unable to collect OpenStack image information \n{e2}")
+            sys.exit(1)
+
+    image_dictionary = {}
+    try:
+        for image in os_images:
+            image_id = getattr(image, 'id', None)
+            image_name = getattr(image, 'name', None)
+
+            if image_id is None and isinstance(image, dict):
+                image_id = image.get('id')
+                image_name = image.get('name')
+
+            if image_id is None:
+                continue
+
+            image_id = str(image_id)
+            if image_name is None or image_name == "":
+                image_name = image_id
+
+            image_dictionary[image_id] = {
+                'image_id': image_id,
+                'image_name': str(image_name)[:128],
+                'os_type': _extract_image_field(image, ("os_type", "hw_os_type")),
+                'os_distro': _extract_image_field(image, ("os_distro",)),
+            }
+    except Exception as e:
+        print(f"Unable to parse OpenStack image information \n{e}")
+        sys.exit(1)
+
+    print("Fetched OpenStack image information")
+    return image_dictionary
+
+
 def get_keystone():
     try:
         mykeystoneprojects = keystone.projects.list()  # An admin-only API call

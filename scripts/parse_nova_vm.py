@@ -28,10 +28,174 @@ from scripts.openstack.checkstatus import getstatus
 
 import settings
 keystone = settings.keystone
+nova = settings.nova
+cinder = settings.cinder
 nb = settings.nb
 cluster_name = settings.cluster_name
 
 unchangedvms = 0
+image_name_cache = {}
+image_os_type_cache = {}
+image_os_distro_cache = {}
+volume_metadata_cache = {}
+
+
+def _extract_image_field(obj, keys):
+    if obj is None:
+        return None
+
+    candidate_maps = []
+    if isinstance(obj, dict):
+        candidate_maps.append(obj)
+
+    properties = getattr(obj, 'properties', None)
+    if isinstance(properties, dict):
+        candidate_maps.append(properties)
+
+    metadata = getattr(obj, 'metadata', None)
+    if isinstance(metadata, dict):
+        candidate_maps.append(metadata)
+
+    for map_obj in candidate_maps:
+        for key in keys:
+            value = map_obj.get(key)
+            if value:
+                return str(value).strip().lower()
+
+    for key in keys:
+        direct_value = getattr(obj, key, None)
+        if direct_value:
+            return str(direct_value).strip().lower()
+
+    return None
+
+
+def _get_boot_volume_ids(instance):
+    attached_volumes = getattr(instance, 'os-extended-volumes:volumes_attached', None)
+    if not attached_volumes:
+        return []
+
+    volume_ids = []
+    for attached_volume in attached_volumes:
+        volume_id = attached_volume.get('id')
+        if volume_id:
+            volume_ids.append(volume_id)
+    return volume_ids
+
+
+def _resolve_boot_volume_metadata(instance):
+    volume_ids = _get_boot_volume_ids(instance)
+    if not volume_ids:
+        return None, None
+
+    for volume_id in volume_ids:
+        if volume_id in volume_metadata_cache:
+            cached_image_name, cached_image_id, cached_os_type, cached_os_distro = volume_metadata_cache[volume_id]
+            if cached_image_name != "Unknown" or cached_os_type is not None or cached_os_distro is not None:
+                return cached_image_name, cached_image_id, cached_os_type, cached_os_distro
+            continue
+
+        volume_image_name = "Unknown"
+        volume_image_id = None
+        volume_os_type = None
+        volume_os_distro = None
+        try:
+            volume_obj = cinder.volumes.get(volume_id)
+            volume_metadata = getattr(volume_obj, 'volume_image_metadata', None)
+            if isinstance(volume_metadata, dict):
+                metadata_image_name = volume_metadata.get('image_name')
+                if metadata_image_name:
+                    volume_image_name = str(metadata_image_name)[:128]
+
+                metadata_image_id = volume_metadata.get('image_id')
+                if metadata_image_id:
+                    volume_image_id = str(metadata_image_id)
+
+                metadata_os_type = volume_metadata.get('os_type')
+                if metadata_os_type:
+                    volume_os_type = str(metadata_os_type).strip().lower()
+
+                metadata_os_distro = volume_metadata.get('os_distro')
+                if metadata_os_distro:
+                    volume_os_distro = str(metadata_os_distro).strip().lower()
+        except Exception:
+            pass
+
+        volume_metadata_cache[volume_id] = (volume_image_name, volume_image_id, volume_os_type, volume_os_distro)
+        if volume_image_name != "Unknown" or volume_os_type is not None or volume_os_distro is not None:
+            return volume_image_name, volume_image_id, volume_os_type, volume_os_distro
+
+    return "Unknown", None, None, None
+
+
+def _resolve_image_details(instance):
+    image_payload = getattr(instance, 'image', None)
+    if not image_payload:
+        volume_image_name, volume_image_id, volume_os_type, volume_os_distro = _resolve_boot_volume_metadata(instance)
+        return volume_image_name, volume_image_id, volume_os_type, volume_os_distro
+
+    if isinstance(image_payload, dict):
+        image_name = image_payload.get('name')
+        image_id = image_payload.get('id')
+    else:
+        image_name = getattr(image_payload, 'name', None)
+        image_id = getattr(image_payload, 'id', None)
+
+    if image_name and image_id:
+        image_name_cache[image_id] = str(image_name)[:128]
+
+    if image_name and image_id in image_os_type_cache and image_id in image_os_distro_cache:
+        return str(image_name)[:128], str(image_id), image_os_type_cache[image_id], image_os_distro_cache[image_id]
+
+    if image_name and not image_id:
+        volume_image_name, volume_image_id, volume_os_type, volume_os_distro = _resolve_boot_volume_metadata(instance)
+        return str(image_name)[:128], volume_image_id, volume_os_type, volume_os_distro
+
+    if not image_id:
+        volume_image_name, volume_image_id, volume_os_type, volume_os_distro = _resolve_boot_volume_metadata(instance)
+        return volume_image_name, volume_image_id, volume_os_type, volume_os_distro
+
+    if image_id in image_name_cache and image_id in image_os_type_cache and image_id in image_os_distro_cache:
+        return image_name_cache[image_id], str(image_id), image_os_type_cache[image_id], image_os_distro_cache[image_id]
+
+    resolved_name = "Unknown"
+    resolved_os_type = None
+    resolved_os_distro = None
+    try:
+        if hasattr(nova, 'glance'):
+            glance_image = nova.glance.find_image(image_id)
+            resolved_name = str(glance_image.name)[:128]
+            resolved_os_type = _extract_image_field(glance_image, ("os_type"))
+            resolved_os_distro = _extract_image_field(glance_image, ("os_distro"))
+    except Exception:
+        pass
+
+    if resolved_name == "Unknown" or resolved_os_type is None or resolved_os_distro is None:
+        try:
+            # Fallback for deployments exposing image retrieval via Nova.
+            image_obj = nova.images.get(image_id)
+            resolved_name = str(image_obj.name)[:128]
+            resolved_os_type = _extract_image_field(image_obj, ("os_type"))
+            resolved_os_distro = _extract_image_field(image_obj, ("os_distro"))
+        except Exception:
+            pass
+
+    if resolved_name == "Unknown" or resolved_os_type is None or resolved_os_distro is None:
+        volume_image_name, volume_image_id, volume_os_type, volume_os_distro = _resolve_boot_volume_metadata(instance)
+        if resolved_name == "Unknown" and volume_image_name != "Unknown":
+            resolved_name = volume_image_name
+        if volume_image_id is not None:
+            image_id = volume_image_id
+        if resolved_os_type is None and volume_os_type is not None:
+            resolved_os_type = volume_os_type
+        if resolved_os_distro is None and volume_os_distro is not None:
+            resolved_os_distro = volume_os_distro
+
+    normalized_image_id = str(image_id)
+    image_name_cache[normalized_image_id] = resolved_name
+    image_os_type_cache[normalized_image_id] = resolved_os_type
+    image_os_distro_cache[normalized_image_id] = resolved_os_distro
+    return resolved_name, normalized_image_id, resolved_os_type, resolved_os_distro
 
 
 def nova_to_netboxvms(myinstances, nova_dictionary, keystone_dictionary,  netbox_vm_dictionary):
@@ -85,6 +249,9 @@ def define_nova_object(instance, flavordictionary, tenantdictionary):
     os_instance_flavorswap = flavordictionary[instance.flavor['id']]['swap']
     os_instance_flavordisk = flavordictionary[instance.flavor['id']]['disk']
     os_instance_flavorephemeral = flavordictionary[instance.flavor['id']]['ephemeral']
+    image_name, image_id, os_type, os_distro = _resolve_image_details(instance)
+    platform_id = settings.get_platform_id_by_image_id(image_id)
+    platform_name = None
     custom_instance_name = instance.name[:53] + "_[" + instance.id[:8] + "]"
     instancename = instance.name[:64]
     try:
@@ -146,13 +313,15 @@ def define_nova_object(instance, flavordictionary, tenantdictionary):
     nova_vm = CreateNovaVmObject(instancename, custom_instance_name, instance.id, instancetenant,
                                  currentstatus, instancehypervisor, hostname,
                                  os_instance_flavorname, os_instance_flavorcpu, os_instance_flavorram,
-                                 os_instance_flavorswap, os_instance_flavordisk, os_instance_flavorephemeral)
+                                 os_instance_flavorswap, os_instance_flavordisk, os_instance_flavorephemeral,
+                                 image_name, image_id, os_type, os_distro, platform_name, platform_id)
     return nova_vm
 
 
 class CreateNovaVmObject(object):
     def __init__(self, name, customname, instance_id, tenant, status, hypervisor, hostname,
-                 flavorname, flavorcpu, flavorram, flavorswap, flavordisk, flavorephemeral):
+                 flavorname, flavorcpu, flavorram, flavorswap, flavordisk, flavorephemeral,
+                 image_name, image_id, os_type, os_distro, platform_name, platform_id):
         self.name = name
         self.custom_name = customname
         self.instance_id = instance_id
@@ -166,6 +335,12 @@ class CreateNovaVmObject(object):
         self.flavorswap = int(flavorswap)
         self.flavordisk = int(flavordisk)
         self.flavorephemeral = int(flavorephemeral)
+        self.image_name = image_name
+        self.image_id = image_id
+        self.os_type = os_type
+        self.os_distro = os_distro
+        self.platform_name = platform_name
+        self.platform_id = platform_id
 
 
 class CreateNetboxVmObject(object):
@@ -186,6 +361,17 @@ class CreateNetboxVmObject(object):
         self.flavorswap = dictionary.custom_fields["openstack_swap"]
         self.flavordisk = dictionary.disk
         self.flavorephemeral = dictionary.custom_fields["openstack_ephemeral"]
+        if settings.netbox_has_openstack_image_cf:
+            self.image_name = dictionary.custom_fields.get("openstack_image")
+        else:
+            self.image_name = None
+
+        if dictionary.platform is not None:
+            self.platform_id = dictionary.platform.id
+            self.platform_name = dictionary.platform.name
+        else:
+            self.platform_id = None
+            self.platform_name = None
 
 
 def compare_vm_objects(os_nova_vm_obj, nb_vm_obj):
@@ -197,6 +383,9 @@ def compare_vm_objects(os_nova_vm_obj, nb_vm_obj):
         # If the NetBox side has a hostname set, we ignore the OpenStack value if it is our default of unknown
         os_nova_vm_obj.hostname = nb_vm_obj.hostname
     try:
+        image_name_changed = settings.netbox_has_openstack_image_cf and nb_vm_obj.image_name != os_nova_vm_obj.image_name
+        platform_changed = os_nova_vm_obj.platform_id is not None and nb_vm_obj.platform_id != os_nova_vm_obj.platform_id
+
         if ((nb_vm_obj.name != os_nova_vm_obj.name and nb_vm_obj.name != os_nova_vm_obj.custom_name) or
                 nb_vm_obj.openstack_id != os_nova_vm_obj.instance_id or
                 nb_vm_obj.tenant != os_nova_vm_obj.tenant or
@@ -207,11 +396,13 @@ def compare_vm_objects(os_nova_vm_obj, nb_vm_obj):
                 nb_vm_obj.flavorcpu != os_nova_vm_obj.flavorcpu or
                 nb_vm_obj.flavorram != os_nova_vm_obj.flavorram or
                 nb_vm_obj.flavorswap != os_nova_vm_obj.flavorswap or
+                image_name_changed or
+                platform_changed or
                 # We skip disk as it is defined by Virtual Disks
                 nb_vm_obj.flavorephemeral != os_nova_vm_obj.flavorephemeral):
             #print(vars(os_nova_vm_obj))
             #print(vars(nb_vm_obj))
-            updatenetboxvm(nb_vm_obj.netbox_id, os_nova_vm_obj)
+            updatenetboxvm(nb_vm_obj.netbox_id, os_nova_vm_obj, nb_vm_obj.platform_id)
         else:
             unchangedvms = unchangedvms + 1
             if (unchangedvms % 10) == 0:
