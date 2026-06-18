@@ -46,6 +46,10 @@ def cinder_to_netboxdisks(cinderdictionary, netbox_volume_dictionary, netbox_vm_
         except Exception as e:
             print(f"Unable to define variables for Volume {volumeid} \n{e}")
             sys.exit(1)
+
+        if netboxvm is None:
+            print(f"Skipping volume {os_cinder_vol.vol_name} because its associated VM is not found in NetBox.")
+            continue
         try:
             if volumeid in netbox_volume_dictionary.keys():
                 # If the disk ID is found in Netbox, we update said Volume

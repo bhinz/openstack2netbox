@@ -80,6 +80,7 @@ def createvmdisk(os_volume_object, netbox_vm):
             os_volume_object.vol_name = os_volume_object.custom_name
             createvmdisk(os_volume_object, netbox_vm)
         else:
+            vm_name = netbox_vm.name if netbox_vm else "Unknown VM"
             print(f"Unable to create Volume {os_volume_object.vol_name} for {netbox_vm.name} \n{e}")
             sys.exit(1)
 
