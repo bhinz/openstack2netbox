@@ -299,8 +299,9 @@ def cleanaddresses(neutroninterfaces, neutronfloat, nb_addresses, netbox_int_dic
         neutron_addresses = set()
         split_address = str(nb_address.address)
         split_address = split_address.split('/')[0]  # NB always gives along the prefix, but Neutron doesn't
-        for ip in neutroninterfaces[nb_interface_os_id]["interfaceips"]:
-            neutron_addresses.add(ip["ip_address"])
+        if nb_interface_os_id in neutroninterfaces:
+            for ip in neutroninterfaces[nb_interface_os_id]["interfaceips"]:
+                neutron_addresses.add(ip["ip_address"])
         for floatid in neutronfloat:
             if neutronfloat[floatid]["boundtointerfaceid"] == nb_interface_os_id:
                 # I'm sorry for looping over the entire dictionary each time ;_;
