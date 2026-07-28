@@ -205,7 +205,9 @@ def cleannetboxvms(nova_vms, neutron_routers, neutron_agents, nb_vm_os_dic):
                 tags = [{"name": tag.name} for tag in vm_obj.tags]
                 if not any(t["name"] == "openstack-api-deleted" for t in tags):
                     tags.append({"name": "openstack-api-deleted"})
-                nb.virtualization.virtual_machines.update([{"id": vmid, "status": "decommissioning", "tags": tags}])
+                vm_obj.status = "decommissioning"
+                vm_obj.tags = tags
+                vm_obj.save()
             print("Succesfully updated old Netbox VMs!\n")
     except Exception as e:
         print(f"Netbox Instance status update went wrong \n{e}")
@@ -242,7 +244,8 @@ def cleanvolumes(nb_vm_dic_nb, nb_volumes, cindervolumes):
                     tags = [{"name": tag.name} for tag in vdisk_obj.tags]
                     if not any(t["name"] == "openstack-api-deleted" for t in tags):
                         tags.append({"name": "openstack-api-deleted"})
-                    nb.virtualization.virtual_disks.update([{"id": vdiskid, "tags": tags}])
+                    vdisk_obj.tags = tags
+                    vdisk_obj.save()
                 print(f"Succesfully added tag to old NetBox Virtual Disks.\n")
         except Exception as e:
             print(f"Unable to process \n{netboxvddeleteid}  \n{e}")
@@ -279,7 +282,8 @@ def cleaninterfaces(neutroninterfaces, netbox_interface_os_dic):
                 tags = [{"name": tag.name} for tag in int_obj.tags]
                 if not any(t["name"] == "openstack-api-deleted" for t in tags):
                     tags.append({"name": "openstack-api-deleted"})
-                nb.virtualization.interfaces.update([{"id": intid, "tags": tags}])
+                int_obj.tags = tags
+                int_obj.save()
             print(f"Succesfully added tag to old NetBox Interfaces.\n")
     except Exception as e:
         print(f"Unable to process \n{netboxinterfacetodelete}  \n{e}")
@@ -322,7 +326,9 @@ def cleanaddresses(neutroninterfaces, neutronfloat, nb_addresses, netbox_int_dic
                 tags = [{"name": tag.name} for tag in addr_obj.tags]
                 if not any(t["name"] == "openstack-api-deleted" for t in tags):
                     tags.append({"name": "openstack-api-deleted"})
-                nb.ipam.ip_addresses.update([{"id": addrid, "status": "deprecated", "tags": tags}])
+                addr_obj.status = "deprecated"
+                addr_obj.tags = tags
+                addr_obj.save()
             print(f"Succesfully updated irrelevant NetBox addresses.\n")
     except Exception as e:
         print(f"Unable to update \n{netboxaddressesdeleteid} \n{e}")
@@ -358,7 +364,9 @@ def cleansubnets(nb_prefix_dic_nb):
                 tags = [{"name": tag.name} for tag in prefix_obj.tags]
                 if not any(t["name"] == "openstack-api-deleted" for t in tags):
                     tags.append({"name": "openstack-api-deleted"})
-                nb.ipam.prefixes.update([{"id": prefixid, "status": "deprecated", "tags": tags}])
+                prefix_obj.status = "deprecated"
+                prefix_obj.tags = tags
+                prefix_obj.save()
             print(f"Succesfully updated irrelevant NetBox Prefixes.\n")
     except Exception as e:
         print(f"Unable to update \n{netboxprefixesdeleteid} \n{e}")
