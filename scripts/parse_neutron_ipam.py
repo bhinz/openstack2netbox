@@ -57,6 +57,10 @@ def netboxipam(neutronintdic, neutronsubnetdictionary, netbox_vm_dictionary, net
             openstacktackipstatus = neutronintdic[portid]['interfacestatus']
             netboxvm = netbox_vm_dictionary.get(openstackinstanceid)
             netboxinterface = netbox_interface_dictionary.get(openstackinterfaceid)
+            if netboxvm is None:
+                print(f"Skipped IP-addresses for Interface {portid}: associated OpenStack Instance "
+                      f"{openstackinstanceid!r} is not in the NetBox VM dictionary for cluster {cluster_name}.")
+                continue
             if neutronintdic[portid]['osifdeviceowner'] == "network:dhcp":
                 openstacktackipstatus = "dhcp"
             elif openstacktackipstatus == "DOWN":
@@ -108,6 +112,14 @@ def netboxipamfloat(neutronfloatdictionary, neutronsubnetdictionary, netbox_vm_d
             openstackinterfaceid = neutronfloatdictionary[floatid]['boundtointerfaceid']
             netboxvm = netbox_vm_dictionary.get(openstackinstanceid)
             netboxinterface = netbox_interface_dictionary.get(openstackinterfaceid)
+            if netboxvm is None:
+                print(f"Skipped Floating IP {floatid}: associated OpenStack Instance "
+                      f"{openstackinstanceid!r} is not in the NetBox VM dictionary for cluster {cluster_name}.")
+                continue
+            if netboxinterface is None:
+                print(f"Skipped Floating IP {floatid}: associated OpenStack Interface "
+                      f"{openstackinterfaceid!r} is not in the NetBox interface dictionary for cluster {cluster_name}.")
+                continue
             # TODO find and merge the subnet of a Floating IP somehow
             if ipaddress.ip_address(openstackfloatip).is_global:
                 address_summary = CreateAddressObject(openstackfloatip, openstacktackipstatus, netboxinterface.id,
